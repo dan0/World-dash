@@ -1,3 +1,4 @@
+
 export enum GameState {
   MENU = 'MENU',
   PLAYING = 'PLAYING',
@@ -57,4 +58,10 @@ export interface GameConfig {
   jumpForce: number;
   speed: number;
   groundHeight: number;
+}
+
+export interface GeneratedAssets {
+    bgImage: HTMLImageElement | null;
+    enemyImage: HTMLImageElement | null;
+    obstacleImage: HTMLImageElement | null;
 }

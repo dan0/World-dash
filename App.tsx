@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState } from 'react';
 import GameCanvas from './components/GameCanvas';
 import { GameState } from './types';
 import { GoogleGenAI } from "@google/genai";
@@ -7,90 +8,112 @@ const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
   const [score, setScore] = useState(0);
   const [location, setLocation] = useState('Edinburgh');
-  const [hasApiKey, setHasApiKey] = useState(false);
+  
+  // Generated Assets
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
+  const [enemyImage, setEnemyImage] = useState<HTMLImageElement | null>(null);
+  const [obstacleImage, setObstacleImage] = useState<HTMLImageElement | null>(null);
+  
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  useEffect(() => {
-    checkApiKey();
-  }, []);
-
-  const checkApiKey = async () => {
-    if ((window as any).aistudio) {
-      const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-      setHasApiKey(hasKey);
-    }
+  const handleStartDefault = () => {
+      setBgImage(null);
+      setEnemyImage(null);
+      setObstacleImage(null);
+      setGameState(GameState.PLAYING);
   };
 
-  const handleSelectKey = async () => {
-    if ((window as any).aistudio) {
-      await (window as any).aistudio.openSelectKey();
-      // Assume success and re-check, or just set true
-      setHasApiKey(true);
-    }
+  const loadImage = (base64: string): Promise<HTMLImageElement> => {
+      return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = `data:image/png;base64,${base64}`;
+      });
   };
 
   const generateWorldAndPlay = async () => {
-    if (!hasApiKey) {
-      await handleSelectKey();
-    }
-    
-    // Check again
-    if (!process.env.API_KEY) {
-        // Fallback if environment variable isn't immediately available, though in this environment it should be injected.
-        // We will proceed. If it fails, we catch the error.
+    // 1. Handle API Key Check/Selection logic for GenAI features
+    if ((window as any).aistudio) {
+        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+            try {
+                await (window as any).aistudio.openSelectKey();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        // Re-check if key is now available
+        const hasKeyAfter = await (window as any).aistudio.hasSelectedApiKey();
+        if (!hasKeyAfter) {
+             setGenerationError("API Key required for custom generation.");
+             return;
+        }
     }
 
     setGameState(GameState.GENERATING);
     setGenerationError(null);
 
     try {
+        // Create new instance to ensure key is fresh
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const model = 'gemini-3-pro-image-preview';
-        const prompt = `A dark, moody, intense neon-gothic 2d game parallax background of ${location}. Cyberpunk style, night time, high contrast. Wide view suitable for side scroller.`;
         
-        const response = await ai.models.generateContent({
-            model: model,
-            contents: {
-                parts: [{ text: prompt }]
-            },
-            config: {
-                imageConfig: {
-                    aspectRatio: "16:9",
-                    imageSize: "2K"
+        const bgPrompt = `Panoramic side-scrolling game background of ${location}, neon cyberpunk noir style, seamless loop, high detail, 2d game art, wide shot.`;
+        const enemyPrompt = `Single sprite of a flying enemy or drone themed around ${location}, cyberpunk neon style, isolated on solid black background, side view, high contrast.`;
+        const obstaclePrompt = `Single sprite of a street obstacle, crate or barrier themed around ${location}, cyberpunk neon style, isolated on solid black background, high contrast.`;
+
+        // Parallel Requests
+        const [bgRes, enemyRes, obsRes] = await Promise.all([
+            ai.models.generateContent({
+                model,
+                contents: { parts: [{ text: bgPrompt }] },
+                config: { imageConfig: { aspectRatio: "16:9", imageSize: "2K" } }
+            }),
+            ai.models.generateContent({
+                model,
+                contents: { parts: [{ text: enemyPrompt }] },
+                config: { imageConfig: { aspectRatio: "1:1", imageSize: "1K" } }
+            }),
+            ai.models.generateContent({
+                model,
+                contents: { parts: [{ text: obstaclePrompt }] },
+                config: { imageConfig: { aspectRatio: "1:1", imageSize: "1K" } }
+            })
+        ]);
+
+        const extractImage = (response: any) => {
+            const candidates = response.candidates;
+            if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
+                for (const part of candidates[0].content.parts) {
+                    if (part.inlineData && part.inlineData.data) {
+                        return part.inlineData.data;
+                    }
                 }
             }
-        });
+            return null;
+        };
 
-        let base64Image = null;
+        const bgB64 = extractImage(bgRes);
+        const enemyB64 = extractImage(enemyRes);
+        const obsB64 = extractImage(obsRes);
+
+        if (bgB64) {
+            const bg = await loadImage(bgB64);
+            setBgImage(bg);
+        }
         
-        // Extract image from response
-        const candidates = response.candidates;
-        if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
-            for (const part of candidates[0].content.parts) {
-                if (part.inlineData && part.inlineData.data) {
-                    base64Image = part.inlineData.data;
-                    break;
-                }
-            }
+        if (enemyB64) {
+            const en = await loadImage(enemyB64);
+            setEnemyImage(en);
+        }
+        
+        if (obsB64) {
+            const obs = await loadImage(obsB64);
+            setObstacleImage(obs);
         }
 
-        if (base64Image) {
-            const img = new Image();
-            img.src = `data:image/png;base64,${base64Image}`;
-            img.onload = () => {
-                setBgImage(img);
-                setGameState(GameState.PLAYING);
-            };
-            img.onerror = () => {
-                setGenerationError("Failed to load generated image asset.");
-                setGameState(GameState.MENU);
-            };
-        } else {
-            // No image found, fallback to default Edinburgh but maybe show a warning?
-            console.warn("No image generated, falling back to procedural assets.");
-            setGameState(GameState.PLAYING);
-        }
+        setGameState(GameState.PLAYING);
 
     } catch (e: any) {
         console.error("Generation failed:", e);
@@ -113,6 +136,8 @@ const App: React.FC = () => {
             setGameState={setGameState} 
             setScore={setScore}
             bgImage={bgImage}
+            enemyImage={enemyImage}
+            obstacleImage={obstacleImage}
         />
 
         {/* HUD - Score */}
@@ -124,55 +149,57 @@ const App: React.FC = () => {
 
         {/* MENU OVERLAY */}
         {gameState === GameState.MENU && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/80 backdrop-blur-sm p-8">
-                <h1 className="text-5xl md:text-7xl text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 to-purple-600 font-black mb-4 drop-shadow-[0_0_25px_rgba(0,243,255,0.5)] gothic-font text-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/85 backdrop-blur-sm p-8">
+                <h1 className="text-5xl md:text-7xl text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 to-purple-600 font-black mb-8 drop-shadow-[0_0_25px_rgba(0,243,255,0.5)] gothic-font text-center">
                     NEON RUNNER
                 </h1>
                 
-                <div className="w-full max-w-md space-y-6">
-                    {!hasApiKey ? (
-                        <div className="text-center space-y-4">
-                             <p className="text-gray-300 text-sm">
-                                To generate custom worlds, please select a paid API Key.
-                                <br/>
-                                <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">Billing Info</a>
-                            </p>
-                            <button 
-                                onClick={handleSelectKey}
-                                className="w-full py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold uppercase tracking-widest transition-all"
-                            >
-                                Select API Key
-                            </button>
-                        </div>
-                    ) : (
-                        <>
-                            <div className="space-y-2">
-                                <label className="text-cyan-400 text-sm uppercase tracking-widest font-bold">Target Location</label>
-                                <input 
-                                    type="text" 
-                                    value={location}
-                                    onChange={(e) => setLocation(e.target.value)}
-                                    className="w-full bg-zinc-900 border-2 border-zinc-700 text-white px-4 py-3 focus:outline-none focus:border-cyan-500 transition-colors font-[Orbitron] text-lg placeholder-zinc-600"
-                                    placeholder="Enter city (e.g. Tokyo, Mars)"
-                                />
-                            </div>
+                <div className="w-full max-w-md space-y-8">
+                    
+                    {/* Standard Play */}
+                    <button 
+                        onClick={handleStartDefault}
+                        className="group relative w-full px-8 py-4 bg-zinc-800 hover:bg-zinc-700 transition-all border border-zinc-600 hover:border-cyan-500"
+                    >
+                         <span className="text-xl font-bold text-white tracking-widest uppercase group-hover:text-cyan-400 transition-colors">
+                            Play Standard Run
+                        </span>
+                        <div className="text-xs text-zinc-500 mt-1 uppercase tracking-widest">Procedural Edinburgh</div>
+                    </button>
 
-                            <button 
-                                onClick={generateWorldAndPlay}
-                                className="group relative w-full px-12 py-4 bg-transparent overflow-hidden"
-                            >
-                                <div className="absolute inset-0 w-3 bg-cyan-500 transition-all duration-[250ms] ease-out group-hover:w-full opacity-20"></div>
-                                <div className="absolute inset-0 border-2 border-cyan-500 blur-[2px] opacity-70"></div>
-                                <div className="absolute inset-0 border-2 border-cyan-500"></div>
-                                <span className="relative text-xl font-bold text-cyan-400 group-hover:text-white transition-colors tracking-widest uppercase">
-                                    Generate World & Run
-                                </span>
-                            </button>
-                        </>
-                    )}
+                    <div className="relative flex items-center justify-center">
+                        <div className="border-t border-zinc-700 w-full"></div>
+                        <span className="absolute bg-black px-4 text-xs text-zinc-500 uppercase tracking-widest">Or Create World</span>
+                    </div>
+
+                    {/* Custom Generation */}
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-cyan-400 text-xs uppercase tracking-widest font-bold">Target Location</label>
+                            <input 
+                                type="text" 
+                                value={location}
+                                onChange={(e) => setLocation(e.target.value)}
+                                className="w-full bg-zinc-900 border-2 border-zinc-700 text-white px-4 py-3 focus:outline-none focus:border-cyan-500 transition-colors font-[Orbitron] text-lg placeholder-zinc-600"
+                                placeholder="e.g. Tokyo, Mars, Atlantis"
+                            />
+                        </div>
+
+                        <button 
+                            onClick={generateWorldAndPlay}
+                            className="group relative w-full px-12 py-4 bg-transparent overflow-hidden"
+                        >
+                            <div className="absolute inset-0 w-3 bg-purple-600 transition-all duration-[250ms] ease-out group-hover:w-full opacity-20"></div>
+                            <div className="absolute inset-0 border-2 border-purple-500 blur-[2px] opacity-70"></div>
+                            <div className="absolute inset-0 border-2 border-purple-500"></div>
+                            <span className="relative text-lg font-bold text-purple-400 group-hover:text-white transition-colors tracking-widest uppercase">
+                                Generate & Play
+                            </span>
+                        </button>
+                    </div>
 
                     {generationError && (
-                        <div className="text-red-500 text-center text-sm bg-red-900/20 p-2 border border-red-500/50">
+                        <div className="text-red-400 text-center text-xs bg-red-900/20 p-3 border border-red-500/30 uppercase tracking-wider">
                             {generationError}
                         </div>
                     )}
@@ -185,9 +212,9 @@ const App: React.FC = () => {
             <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-black">
                  <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-8"></div>
                  <h2 className="text-2xl text-cyan-400 animate-pulse tracking-widest uppercase">
-                    Generating Assets...
+                    Constructing World...
                  </h2>
-                 <p className="text-zinc-500 text-sm mt-2">Using Gemini 3.0 Pro Vision</p>
+                 <p className="text-zinc-500 text-sm mt-2">Generating Background, Enemies & Obstacles for {location}...</p>
             </div>
         )}
 
@@ -206,7 +233,7 @@ const App: React.FC = () => {
                         onClick={() => setGameState(GameState.MENU)}
                         className="px-8 py-3 border border-white/20 text-white/70 hover:bg-white/10 hover:text-white transition-all uppercase tracking-wider"
                     >
-                        New Location
+                        Main Menu
                     </button>
                     <button 
                         onClick={() => setGameState(GameState.PLAYING)}
@@ -221,7 +248,7 @@ const App: React.FC = () => {
 
       {/* Footer / Aesthetic Elements */}
       <div className="absolute bottom-4 left-6 text-xs text-white/30 uppercase tracking-[0.2em] font-light">
-          System: Online &bull; Loc: {location} &bull; Mode: Dark
+          System: Online &bull; Loc: {bgImage ? location : 'Edinburgh (Default)'} &bull; Mode: Dark
       </div>
     </div>
   );

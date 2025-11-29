@@ -5,7 +5,7 @@ import {
     CANVAS_WIDTH, CANVAS_HEIGHT, COLORS, GRAVITY, JUMP_FORCE, 
     INITIAL_SPEED, GROUND_HEIGHT, ROTATION_SPEED, MAX_SPEED 
 } from '../constants';
-import { drawSkyline, drawCobblestones, drawPlayer, drawRain, drawParticles, draw3DObstacle } from '../utils/drawingUtils';
+import { drawSkyline, drawCobblestones, drawPlayer, drawRain, drawParticles, draw3DObstacle, drawDrone } from '../utils/drawingUtils';
 import { AudioManager } from '../utils/audioManager';
 
 interface GameCanvasProps {
@@ -13,9 +13,11 @@ interface GameCanvasProps {
     setGameState: (state: GameState) => void;
     setScore: (score: number) => void;
     bgImage: HTMLImageElement | null;
+    enemyImage: HTMLImageElement | null;
+    obstacleImage: HTMLImageElement | null;
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setScore, bgImage }) => {
+const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setScore, bgImage, enemyImage, obstacleImage }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const requestRef = useRef<number>(0);
     const frameCountRef = useRef(0);
@@ -356,11 +358,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
         const groundY = CANVAS_HEIGHT - GROUND_HEIGHT;
         drawCobblestones(ctx, scrollRef.current, groundY);
 
-        // 4. Obstacles (3D)
+        // 4. Obstacles (3D or Sprites)
         obstaclesRef.current.forEach(obs => {
             const screenX = obs.x - scrollRef.current;
             if (screenX > -200 && screenX < CANVAS_WIDTH + 200) {
-                draw3DObstacle(ctx, obs, scrollRef.current);
+                if (obs.type === 'DRONE') {
+                    drawDrone(ctx, screenX, obs.y, obs.width, obs.height, COLORS.drone, enemyImage);
+                } else {
+                    draw3DObstacle(ctx, obs, scrollRef.current, obstacleImage);
+                }
             }
         });
 
@@ -378,7 +384,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, setGameState, setSco
         ctx.restore(); 
 
         frameCountRef.current++;
-    }, [bgImage]);
+    }, [bgImage, enemyImage, obstacleImage]);
 
     const loop = useCallback(() => {
         update();

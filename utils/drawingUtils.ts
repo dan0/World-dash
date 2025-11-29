@@ -1,3 +1,4 @@
+
 import { COLORS, CANVAS_HEIGHT, CANVAS_WIDTH } from '../constants';
 import { Particle, Obstacle } from '../types';
 
@@ -25,6 +26,10 @@ export const drawSkyline = (ctx: CanvasRenderingContext2D, scrollX: number, laye
       // Draw twice for seamless loop
       ctx.drawImage(bgImage, -relativeX, 0, scaledWidth, CANVAS_HEIGHT);
       ctx.drawImage(bgImage, -relativeX + scaledWidth, 0, scaledWidth, CANVAS_HEIGHT);
+      // Draw a third time to prevent gaps on wide screens or fast scrolls
+      if (-relativeX + scaledWidth < CANVAS_WIDTH) {
+         ctx.drawImage(bgImage, -relativeX + (scaledWidth * 2), 0, scaledWidth, CANVAS_HEIGHT);
+      }
       
       // Add a dark overlay to ensure gameplay visibility
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -225,61 +230,75 @@ export const drawParticles = (ctx: CanvasRenderingContext2D, particles: Particle
     });
 };
 
-export const drawDrone = (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, color: string) => {
+export const drawDrone = (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, color: string, enemyImage?: HTMLImageElement | null) => {
     ctx.save();
     ctx.translate(x + width/2, y + height/2);
     
-    // Bobbing animation handled by physics in GameCanvas, but we can add local spin or pulse
-    
-    // Core
-    ctx.fillStyle = '#111';
-    ctx.beginPath();
-    ctx.arc(0, 0, width/3, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // Glowing Eye
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = color;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(0, 0, width/6, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // Rotating Rings
-    const time = Date.now() * 0.005;
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 2;
-    
-    // Ring 1
-    ctx.beginPath();
-    ctx.ellipse(0, 0, width/2, height/4, time, 0, Math.PI * 2);
-    ctx.stroke();
+    if (enemyImage) {
+        // Use the generated enemy sprite
+        // We use 'screen' composite mode because generated sprites on black backgrounds look great this way in a neon game
+        ctx.globalCompositeOperation = 'screen';
+        const scale = 1.5; // Make sprites slightly larger than hitboxes for visual flair
+        ctx.drawImage(enemyImage, -width * scale / 2, -height * scale / 2, width * scale, height * scale);
+        
+        // Add a pulse glow behind it
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = color;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, width/2, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        // Procedural Drone
+        
+        // Core
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(0, 0, width/3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Glowing Eye
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = color;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, width/6, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Rotating Rings
+        const time = Date.now() * 0.005;
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 2;
+        
+        // Ring 1
+        ctx.beginPath();
+        ctx.ellipse(0, 0, width/2, height/4, time, 0, Math.PI * 2);
+        ctx.stroke();
 
-    // Ring 2
-    ctx.beginPath();
-    ctx.ellipse(0, 0, width/2, height/4, -time, 0, Math.PI * 2);
-    ctx.stroke();
+        // Ring 2
+        ctx.beginPath();
+        ctx.ellipse(0, 0, width/2, height/4, -time, 0, Math.PI * 2);
+        ctx.stroke();
 
-    // Scanner beam (Triangle)
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.3;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(-20, 40);
-    ctx.lineTo(20, 40);
-    ctx.fill();
+        // Scanner beam (Triangle)
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-20, 40);
+        ctx.lineTo(20, 40);
+        ctx.fill();
+    }
     
     ctx.restore();
 };
 
-export const draw3DObstacle = (ctx: CanvasRenderingContext2D, obs: Obstacle, scrollX: number) => {
+export const draw3DObstacle = (ctx: CanvasRenderingContext2D, obs: Obstacle, scrollX: number, obstacleImage?: HTMLImageElement | null) => {
     const screenX = obs.x - scrollX;
     
-    // Simple 3D projection parameters
-    const depth = 20;
-
     if (obs.type === 'DRONE') {
-        drawDrone(ctx, screenX, obs.y, obs.width, obs.height, COLORS.drone);
+        // drawDrone is called separately usually or we can route here
+        // But the main loop routes types. Let's assume logic routes correctly.
         return;
     }
     
@@ -325,6 +344,23 @@ export const draw3DObstacle = (ctx: CanvasRenderingContext2D, obs: Obstacle, scr
         ctx.fill();
         
     } else if (obs.type === 'BLOCK' || obs.type === 'PLATFORM') {
+        
+        // If we have a generated obstacle sprite and it is a BLOCK
+        if (obstacleImage && obs.type === 'BLOCK') {
+            ctx.globalCompositeOperation = 'screen';
+            // Draw slightly larger to cover the box
+            ctx.drawImage(obstacleImage, screenX - 5, obs.y - 5, obs.width + 10, obs.height + 10);
+            
+            // Add a simple bounding box for clarity
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(screenX, obs.y, obs.width, obs.height);
+            ctx.restore();
+            return;
+        }
+
+        // --- Procedural Fallback ---
+        const depth = 20;
         const isPlatform = obs.type === 'PLATFORM';
         const blockColor = isPlatform ? '#2a2a35' : '#1a1a1a';
         
